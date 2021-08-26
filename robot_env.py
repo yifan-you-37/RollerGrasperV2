@@ -1,8 +1,11 @@
 from mujoco_py import load_model_from_path, MjSim, MjViewer
 from mujoco_py.generated import const
-from utils import *
+from RollerGrasperV2.utils import *
+import pathlib
+import os
 
-XML_PATH = "xml/roller_grasper_v2.xml"
+file_folder_dir = pathlib.Path(__file__).parent.resolve()
+XML_PATH = os.path.join(file_folder_dir, "xml/roller_grasper_v2.xml")
 np.set_printoptions(precision=4, suppress=False)
 
 # Constants
@@ -35,10 +38,10 @@ class RollerFinger(object):
 
 
 class RobotEnv(object):
-    def __init__(self):
+    def __init__(self, args=None):
         self.model = load_model_from_path(XML_PATH)
         self.sim = MjSim(self.model)
-        self.viewer = MjViewer(self.sim)
+        # self.viewer = MjViewer(self.sim)
 
         # finger instances
         self.front_finger = RollerFinger(idx=0,
@@ -67,16 +70,23 @@ class RobotEnv(object):
         self.target_box_pos = np.array([0.0, 0.0, 0.2])     # obj target pos
 
         self.max_step = 1500
+        self._max_episode_steps = self.max_step
         self.termination = False
         self.success = False
         self.timestep = 0
 
         self.k_vw = 0.5
         self.k_vv = 0.3
-
+        
+        self.state_dim = 16
+        self.action_dim = 9
+        self.max_action = np.array([0.05, 0.05, 0.05, 0.2, 0.2, 0.2, 0.01, 0.01, 0.01])
         self.reset()
 
-    def reset(self, target_axis=np.array([0., 1., 1.]), target_angle=90):
+        self.args = args
+        print('linear reard', self.args.linear_reward)
+
+    def reset(self, target_axis=np.array([0., 0., 1.]), target_angle=90):
 
         self.sim.reset()
 
@@ -103,6 +113,7 @@ class RobotEnv(object):
                                      self.axis[0] * np.sin(self.angle / 2),
                                      self.axis[1] * np.sin(self.angle / 2),
                                      self.axis[2] * np.sin(self.angle / 2)])
+                                     
         self.curr = self.sim.data.sensordata[-7:]  # quat_to_rot(self.sim.data.sensordata[-4:])
         self.rot_matrix_target = R.from_quat(quat_to_quat(self.quat_target)).as_matrix()
         self.test_min_err = 100
@@ -148,8 +159,8 @@ class RobotEnv(object):
         for i in range(len(action)):
             self.sim.data.ctrl[i] = action[i]
 
-        self.viewer.add_overlay(const.GRID_TOPRIGHT, " ", self.session_name)
-        self.viewer.render()
+        # self.viewer.add_overlay(const.GRID_TOPRIGHT, " ", self.session_name)
+        # self.viewer.render()
         self.sim.step()
         self.timestep += 1
 
@@ -161,13 +172,20 @@ class RobotEnv(object):
         err_curr = SCALE_ERROR_ROT * err_curr_rot + SCALE_ERROR_POS * err_curr_pos
         self.test_min_err = min(self.test_min_err, err_curr_rot)
         if err_curr < 15:
-            self.termination = True
+            # self.termination = True
             self.success = True
-        else:
-            if self.timestep > self.max_step or err_curr_pos > 0.05:
-                self.termination = True
-                self.success = False
+        # else:
+        if self.timestep > self.max_step or err_curr_pos > 0.05:
+            self.termination = True
+            self.success = False
         #if self.termination:
         #    print("target axis",self.axis,"success",self.success,"min_error",self.test_min_err)
-        return obs, self.termination, self.success
+
+        # print(err_curr_rot, err_curr_pos)
+        if self.args.linear_reward:
+            reward = (70 - err_curr) / 10
+        else:
+            reward = 100./err_curr
+        return obs, reward, self.termination, float(self.success)
+        # return obs, self.termination, self.success, None
 

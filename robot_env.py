@@ -38,10 +38,13 @@ class RollerFinger(object):
 
 
 class RobotEnv(object):
-    def __init__(self, args=None):
+    def __init__(self, gui, args=None):
         self.model = load_model_from_path(XML_PATH)
+        self.gui = args.gui
         self.sim = MjSim(self.model)
-        # self.viewer = MjViewer(self.sim)
+
+        if self.gui:
+            self.viewer = MjViewer(self.sim)
 
         # finger instances
         self.front_finger = RollerFinger(idx=0,
@@ -66,8 +69,8 @@ class RobotEnv(object):
         self.axis = normalize_vec(np.array([0., 1., 1.]))
         self.angle = deg_to_rad(90)
 
-        self.init_box_pos = np.array([0.0, 0.0, 0.2])       # obj initial pos
-        self.target_box_pos = np.array([0.0, 0.0, 0.2])     # obj target pos
+        self.init_box_pos = np.array([0.0, 0.0, 0.25])       # obj initial pos
+        self.target_box_pos = np.array([0.0, 0.0, 0.21])     # obj target pos
 
         self.max_step = 1500
         self._max_episode_steps = self.max_step
@@ -80,14 +83,19 @@ class RobotEnv(object):
         
         self.state_dim = 16
         self.action_dim = 9
-        self.max_action = np.array([0.05, 0.05, 0.05, 0.2, 0.2, 0.2, 0.01, 0.01, 0.01])
+        self.max_action = np.array([0.01, 0.01, 0.01, 0.1, 0.1, 0.1, 4, 4, 4])
+        self.max_action[:6] = 0.0001
         self.reset()
 
         self.args = args
+
+        self.err_curr_last_step = None
+        self.reward_scale = args.roller_reward_scale
+        print('roller reward scale', self.reward_scale)
         print('linear reard', self.args.linear_reward)
 
-    def reset(self, target_axis=np.array([0., 0., 1.]), target_angle=90):
-
+    def reset(self, target_axis=np.array([0., 0., 1.]), target_angle=50):
+        self.err_curr_last_step = None
         self.sim.reset()
 
         # Reset finger positions
@@ -158,9 +166,9 @@ class RobotEnv(object):
     def step(self, action):
         for i in range(len(action)):
             self.sim.data.ctrl[i] = action[i]
-
-        # self.viewer.add_overlay(const.GRID_TOPRIGHT, " ", self.session_name)
-        # self.viewer.render()
+        if self.gui:
+            self.viewer.add_overlay(const.GRID_TOPRIGHT, " ", self.session_name)
+            self.viewer.render()
         self.sim.step()
         self.timestep += 1
 
@@ -172,20 +180,25 @@ class RobotEnv(object):
         err_curr = SCALE_ERROR_ROT * err_curr_rot + SCALE_ERROR_POS * err_curr_pos
         self.test_min_err = min(self.test_min_err, err_curr_rot)
         if err_curr < 15:
-            # self.termination = True
-            self.success = True
-        # else:
-        if self.timestep > self.max_step or err_curr_pos > 0.05:
             self.termination = True
-            self.success = False
+            self.success = True
+        else:
+            if self.timestep > self.max_step or err_curr_pos > 0.05:
+                self.termination = True
+                self.success = False
         #if self.termination:
         #    print("target axis",self.axis,"success",self.success,"min_error",self.test_min_err)
-
+        if self.err_curr_last_step is None:
+            self.err_curr_last_step = err_curr
+        err_diff = err_curr - self.err_curr_last_step
         # print(err_curr_rot, err_curr_pos)
         if self.args.linear_reward:
-            reward = (70 - err_curr) / 10
+            # reward = (50 - err_curr) / 100
+            reward = -1  * err_diff * self.reward_scale
         else:
             reward = 100./err_curr
+
+        self.err_curr_last_step = err_curr
         return obs, reward, self.termination, float(self.success)
         # return obs, self.termination, self.success, None
 

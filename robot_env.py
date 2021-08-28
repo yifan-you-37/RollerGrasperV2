@@ -91,6 +91,7 @@ class RobotEnv(object):
 
         self.err_curr_last_step = None
         self.reward_scale = args.roller_reward_scale
+        self.args.linear_reward = True
         print('roller reward scale', self.reward_scale)
         print('linear reard', self.args.linear_reward)
 
